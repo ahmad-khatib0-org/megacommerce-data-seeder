@@ -1,2 +1,5 @@
 Faker
 psycopg2-binary
+pydantic
+pyyaml
+python-ulid

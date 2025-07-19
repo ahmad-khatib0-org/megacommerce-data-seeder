@@ -1,0 +1,7 @@
+---
+db:
+  dsn: postgres://megacommerce:megacommerce@127.0.0.1:5432/megacommerce?sslmode=disable
+
+seeding:
+  number_of_suppliers: 100
+  number_of_customers: 100
