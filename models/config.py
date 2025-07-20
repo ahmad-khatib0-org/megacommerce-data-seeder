@@ -5,7 +5,7 @@ class ConfigDB(BaseModel):
   dsn: str
 
 
-class ConfigSeeding:
+class ConfigSeeding(BaseModel):
   number_of_suppliers: int
   number_of_customers: int
 

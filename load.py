@@ -5,7 +5,7 @@ from models.config import Config
 from db import DatabasePool
 
 
-def load():
+def load() -> Config:
   with open("config.yaml", "r") as f:
     data = yaml.safe_load(f)
   config = Config(**data)
@@ -24,3 +24,5 @@ def load():
     )
   except Exception as e:
     raise RuntimeError("failed to initialize database connection ", e)
+
+  return config
