@@ -4,3 +4,4 @@ pydantic
 pyyaml
 python-ulid
 bcrypt
+ulid

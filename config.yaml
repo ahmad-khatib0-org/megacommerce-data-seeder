@@ -5,3 +5,5 @@ db:
 seeding:
   number_of_suppliers: 100
   number_of_customers: 100
+  number_of_products_per_supplier: 30
+  number_of_suppliers_have_products: 10
