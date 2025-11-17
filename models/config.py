@@ -12,6 +12,14 @@ class ConfigSeeding(BaseModel):
   number_of_suppliers_have_products: int
 
 
+class ConfigMinio(BaseModel):
+  amazon_s3_endpoint: str
+  amazon_s3_bucket: str
+  amazon_s3_access_key_id: str
+  amazon_s3_secret_access_key: str
+
+
 class Config(BaseModel):
   db: ConfigDB
   seeding: ConfigSeeding
+  minio: ConfigMinio

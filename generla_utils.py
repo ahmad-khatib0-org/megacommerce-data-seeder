@@ -1,3 +1,4 @@
+from datetime import datetime
 import sys
 from time import time
 from typing import Any
@@ -21,3 +22,7 @@ def fatal(*args: Any, **kwargs: Any) -> None:
 
 def time_in_milies() -> float:
   return time() * 1000
+
+
+def get_time_miliseconds():
+  return int(datetime.now().timestamp() * 1000)

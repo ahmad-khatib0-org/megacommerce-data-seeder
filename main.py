@@ -2,7 +2,7 @@ from db import DatabasePool
 from generla_utils import fatal
 from load import load
 from seed_products import seed_products
-from seed_users import seed_uesrs
+from seed_users import seed_users
 
 
 def main():
@@ -11,7 +11,7 @@ def main():
 
   conn = DatabasePool.get_conn()
   try:
-    # seed_uesrs(conn, config)
+    seed_users(conn, config)
     seed_products(conn, config)
 
     conn.commit()

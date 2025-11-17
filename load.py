@@ -15,13 +15,15 @@ def load() -> Config:
   except Exception as e:
     raise RuntimeError("failed to parse db connection DSN", e)
 
+  print(parsed)
   try:
-    DatabasePool.initialize(
-        host=parsed.hostname,
-        dbname=parsed.path.lstrip("/"),
-        user=parsed.username,
-        password=parsed.password,
-    )
+    DatabasePool.initialize(host=parsed.hostname,
+                            port=parsed.port,
+                            dbname=parsed.path.lstrip("/"),
+                            user=parsed.username,
+                            password=parsed.password,
+                            sslmode="disable")
+    print('connected')
   except Exception as e:
     raise RuntimeError("failed to initialize database connection ", e)
 
