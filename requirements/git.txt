@@ -1,0 +1,2 @@
+# Always fetch the latest from main branch
+git+https://github.com/ahmad-khatib0-org/megacommerce-proto.git@main#egg=megacommerce_proto
