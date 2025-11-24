@@ -5,7 +5,7 @@ from faker import Faker
 from psycopg2.extensions import connection
 from ulid import ULID
 
-from general_utils import password_hash, time_in_milies
+from general_utils.general import password_hash, time_in_milies
 from models.config import Config
 
 

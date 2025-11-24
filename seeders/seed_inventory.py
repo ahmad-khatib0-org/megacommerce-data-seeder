@@ -5,7 +5,7 @@ from products.v1.product_pb2 import ProductOffer
 from psycopg2.extensions import connection
 from ulid import ULID
 
-from general_utils import get_time_miliseconds
+from general_utils.general import get_time_miliseconds
 
 fake = Faker()
 
@@ -48,5 +48,5 @@ def seed_inventory(conn: connection):
                     'source': 'seed',
                     'auto_generated': True
                 }),
-                int(get_time_miliseconds())
+                get_time_miliseconds()
             ])

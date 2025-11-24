@@ -1,10 +1,10 @@
-from db import DatabasePool
-from general_utils import fatal
-from load import load
-from seed_inventory import seed_inventory
-from seed_orders import seed_orders
-from seed_products import seed_products
-from seed_users import seed_users
+from general_utils.db import DatabasePool
+from general_utils.general import fatal
+from seeders.load import load
+from seeders.seed_inventory import seed_inventory
+from seeders.seed_orders import seed_orders
+from seeders.seed_products import seed_products
+from seeders.seed_users import seed_users
 
 
 def main():

@@ -8,9 +8,9 @@ from products.v1.product_pb2 import ProductOffer
 from psycopg2.extensions import connection, cursor
 from ulid import ULID
 
-from general_utils import get_time_miliseconds
+from general_utils.general import get_time_miliseconds
 from models.config import Config
-from orders import create_successful_payment, get_products, get_user_ids
+from seeders.orders import create_successful_payment, get_products, get_user_ids
 
 fake = Faker()
 

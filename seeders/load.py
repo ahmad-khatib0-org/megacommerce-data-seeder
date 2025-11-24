@@ -2,7 +2,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from db import DatabasePool
+from general_utils.db import DatabasePool
 from models.config import Config
 
 
