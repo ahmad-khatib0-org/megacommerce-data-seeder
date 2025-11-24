@@ -1,8 +1,9 @@
-import yaml
 from urllib.parse import urlparse
 
-from models.config import Config
+import yaml
+
 from db import DatabasePool
+from models.config import Config
 
 
 def load() -> Config:

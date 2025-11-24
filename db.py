@@ -1,4 +1,5 @@
 import threading
+
 from psycopg2 import pool
 from psycopg2.extensions import connection
 

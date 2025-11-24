@@ -10,6 +10,7 @@ class ConfigSeeding(BaseModel):
   number_of_customers: int
   number_of_products_per_supplier: int
   number_of_suppliers_have_products: int
+  number_of_customers_have_orders: int
 
 
 class ConfigMinio(BaseModel):

@@ -5,7 +5,7 @@ from products.v1.product_pb2 import ProductOffer
 from psycopg2.extensions import connection
 from ulid import ULID
 
-from generla_utils import get_time_miliseconds
+from general_utils import get_time_miliseconds
 
 fake = Faker()
 

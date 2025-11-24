@@ -8,7 +8,7 @@ from minio import Minio
 from psycopg2.extras import Json, RealDictCursor
 from ulid import ULID
 
-from generla_utils import get_time_miliseconds
+from general_utils import get_time_miliseconds
 from models.config import Config
 from product_title import generate_product_title
 from products import generate_bullet_points_list, generate_fashion_product_id_info
