@@ -1,10 +1,9 @@
 import json
-
 from faker import Faker
 from google.protobuf import json_format
 from products.v1.product_pb2 import ProductOffer
 from psycopg2.extensions import cursor
-
+from models.app import SeedingError
 from models.config import Config
 
 fake = Faker()
@@ -18,37 +17,67 @@ class ProductIDAndOffer:
 
 
 def get_user_ids(cur: cursor, cfg: Config) -> list[str]:
+  """
+    Fetches a list of customer IDs from the database.
+    Raises SeedingError on database operation failure.
+    """
   stmt = "SELECT id FROM users WHERE user_type = %s AND roles && %s ORDER BY created_at LIMIT %s"
-  cur.execute(stmt, (
-      'customer',
-      ['customer'],
-      cfg.seeding.number_of_customers_have_orders,
-  ))
+  try:
+    # Execute the SQL statement
+    cur.execute(stmt, (
+        'customer',
+        ['customer'],
+        cfg.seeding.number_of_customers_have_orders,
+    ))
 
-  rows = cur.fetchall()
-  customer_ids: list[str] = []
-  for row in rows:
-    customer_ids.append(row[0])
+    rows = cur.fetchall()
+    customer_ids: list[str] = []
+    for row in rows:
+      customer_ids.append(row[0])
 
-  return customer_ids
+    return customer_ids
+  except Exception as e:
+    # Catch any exception (like psycopg2.Error) and raise a SeedingError
+    message = f"Failed to retrieve user IDs. Database error: {e}"
+    raise SeedingError(message) from e
 
 
 def get_products(cur: cursor) -> list[ProductIDAndOffer]:
+  """
+    Fetches products and parses their offers from the database.
+    Raises SeedingError on database operation or JSON parsing failure.
+    """
   stmt = "SELECT id, offer, title FROM products"
-  cur.execute(stmt)
+  try:
+    # Database operation
+    cur.execute(stmt)
+    rows = cur.fetchall()
+    products = []
 
-  rows = cur.fetchall()
-  products = []
-  for row in rows:
-    product_id = row[0]
-    offer_json = row[1]
-    offer = ProductOffer()
-    if offer_json:
-      json_format.Parse(offer_json, offer)
+    for row in rows:
+      product_id = row[0]
+      offer_json = row[1]
+      offer = ProductOffer()
 
-    products.append(ProductIDAndOffer(id=product_id, title=row[2], offer=offer))
+      # Data parsing operation
+      if offer_json:
+        try:
+          json_format.Parse(offer_json, offer)
+        except Exception as parse_e:
+          # Catch protobuf/json_format parsing errors
+          message = f"Failed to parse ProductOffer for product ID {product_id}. Error: {parse_e}"
+          raise SeedingError(message) from parse_e
 
-  return products
+      products.append(ProductIDAndOffer(id=product_id, title=row[2], offer=offer))
+
+    return products
+  except SeedingError:
+    # Re-raise the SeedingError from inside the loop
+    raise
+  except Exception as e:
+    # Catch any exception (like psycopg2.Error) and raise a SeedingError
+    message = f"Failed to retrieve products. Database error: {e}"
+    raise SeedingError(message) from e
 
 
 def create_successful_payment(amount_cents: int, currency: str):

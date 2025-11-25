@@ -5,9 +5,9 @@ db:
 seeding:
   number_of_suppliers: 100
   number_of_customers: 10
-  number_of_products_per_supplier: 30
-  number_of_suppliers_have_products: 10
-  number_of_customers_have_orders: 10
+  number_of_products_per_supplier: 1
+  number_of_suppliers_have_products: 1
+  number_of_customers_have_orders: 1
 
 minio:
   amazon_s3_endpoint: "localhost:9000"

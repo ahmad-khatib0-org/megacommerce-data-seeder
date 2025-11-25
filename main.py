@@ -9,19 +9,31 @@ from seeders.seed_users import seed_users
 
 def main():
   print("megacommerce data seeder")
-  config = load()
 
-  conn = DatabasePool.get_conn()
+  config = load()
+  conn = None
+
   try:
+    conn = DatabasePool.get_conn()
+    conn.autocommit = False
+
     seed_users(conn, config)
     seed_products(conn, config)
     seed_inventory(conn)
     seed_orders(conn, config)
 
+    # All operations successful, commit the transaction
     conn.commit()
+    print("Successfully committed all seeding changes.")
+
   except Exception as e:
-    conn.rollback()
+    if conn:
+      conn.rollback()
     fatal("error running database seeding transaction", e)
+
+  finally:
+    if conn:
+      DatabasePool.release_conn(conn)
 
 
 if __name__ == "__main__":
