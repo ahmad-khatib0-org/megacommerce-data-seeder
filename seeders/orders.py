@@ -56,13 +56,15 @@ def get_products(cur: cursor) -> list[ProductIDAndOffer]:
 
     for row in rows:
       product_id = row[0]
-      offer_json = row[1]
+      offer_data = row[1]  # This is now a Python dict (from jsonb)
       offer = ProductOffer()
 
       # Data parsing operation
-      if offer_json:
+      if offer_data:
         try:
-          json_format.Parse(offer_json, offer)
+          offer_json_string = json.dumps(offer_data)
+
+          json_format.Parse(offer_json_string, offer)
         except Exception as parse_e:
           # Catch protobuf/json_format parsing errors
           message = f"Failed to parse ProductOffer for product ID {product_id}. Error: {parse_e}"

@@ -5,16 +5,14 @@ from typing import Any, Dict
 from faker import Faker
 from orders.v1.order_line_items_pb2 import OrderLineItem
 from products.v1.product_pb2 import ProductOffer
-from psycopg2.extensions import connection, cursor
 from psycopg2 import Error as Psycopg2Error
+from psycopg2.extensions import connection, cursor
 from ulid import ULID
 
 from general_utils.general import get_time_miliseconds
 from models.app import SeedingError
 from models.config import Config
 from seeders.orders import create_successful_payment, get_products, get_user_ids
-
-# -------------------------------------------------
 
 fake = Faker()
 
@@ -36,110 +34,108 @@ def seed_orders(con: connection, cfg: Config):
 
     product_idx = 0
     for user_id in user_ids:
-      for _ in range(cfg.seeding.number_of_customers_have_orders):
-        order_id = str(ULID())  # Define here to use in error message
+      order_id = str(ULID())
+      try:
+        # Logic to cycle through products
+        if (product_idx + 1) >= len(products):
+          product_idx = 0
+        else:
+          product_idx += 1
 
-        try:
-          # Logic to cycle through products
-          if (product_idx + 1) >= len(products):
-            product_idx = 0
-          else:
-            product_idx += 1
+        # Gather key data
+        now_ms = get_time_miliseconds()
+        offer = products[product_idx].offer
+        product_id = products[product_idx].id
+        product_title = products[product_idx].title
 
-          # Gather key data
-          now_ms = get_time_miliseconds()
-          offer = products[product_idx].offer
-          product_id = products[product_idx].id
-          product_title = products[product_idx].title
+        # --- Step 1: Insert Idempotency Key ---
+        idempotency_key = 'idem_' + str(ULID())
+        insert_idempotency_key(cur, user_id, 'IN_PROGRESS', idempotency_key)
 
-          # --- Step 1: Insert Idempotency Key ---
-          insert_idempotency_key(cur, user_id, order_id, 'IN_PROGRESS')
+        # --- Step 2: Get Line Items
+        items = get_order_line_items(cur, offer, product_id, product_title, order_id, now_ms)
+        order_line_items: list[Dict[str, Any]] = items['items']
+        subtotal_cents = items['subtotal_cents']
+        total_discount_cents = items['total_discount_cents']
+        total_tax_cents = items['total_tax_cents']
+        total_shipping_cents = items['total_shipping_cents']
+        total_cents = subtotal_cents - total_discount_cents + total_tax_cents + total_shipping_cents
 
-          # --- Step 2: Insert Inventory Reservation ---
-          reservation_id = str(ULID())
-          reservation_token = f"res_{str(ULID())}"
-          insert_inventory_reservation(cur, reservation_id, reservation_token, order_id)
+        # --- Step 3: Insert Order ---
+        insert_order(cur, order_id, user_id, total_cents, subtotal_cents, total_shipping_cents,
+                     total_tax_cents, total_discount_cents, total_cents)
 
-          # --- Step 3: Get Line Items (Contains key calculation/parsing risks) ---
-          # get_order_line_items will raise SeedingError on failure
-          items = get_order_line_items(cur, offer, product_id, product_title, order_id, now_ms)
-          order_line_items: list[OrderLineItem] = items['items']
-          subtotal_cents = items['subtotal_cents']
-          total_discount_cents = items['total_discount_cents']
-          total_tax_cents = items['total_tax_cents']
-          total_shipping_cents = items['total_shipping_cents']
-          total_cents = subtotal_cents - total_discount_cents + total_tax_cents + total_shipping_cents
+        # --- Step 4: Insert Inventory Reservation ---
+        reservation_id = str(ULID())
+        reservation_token = f"res_{str(ULID())}"
+        insert_inventory_reservation(cur, reservation_id, reservation_token, order_id)
 
-          # --- Step 4: Insert Order ---
-          insert_order(cur, order_id, user_id, total_cents, subtotal_cents, total_shipping_cents,
-                       total_tax_cents, total_discount_cents, total_cents)
+        # --- Step 5: Insert Order Line Items ---
+        for order_line_item in order_line_items:
+          inventory_id = order_line_item['inventory_item_id']
+          item: OrderLineItem = order_line_item['order_line_item']
+          insert_order_line_item(cur, item.id, order_id, item.product_id, item.variant_id, item.sku,
+                                 item.title, item.quantity, item.unit_price_cents,
+                                 item.list_price_cents, item.sale_price_cents, item.discount_cents,
+                                 item.tax_cents, item.total_cents, item.shipping_cents)
+          insert_inventory_reservation_item(cur, reservation_id, inventory_id, item.quantity)
 
-          # --- Step 5: Insert Order Line Items ---
-          for item in order_line_items:
-            insert_order_line_item(cur, order_id, item.product_id, item.variant_id, item.sku,
-                                   item.title, item.quantity, item.unit_price_cents,
-                                   item.list_price_cents, item.sale_price_cents,
-                                   item.discount_cents, item.tax_cents, item.total_cents,
-                                   item.shipping_cents)
+        # --- Step 6: Insert Order Events (CREATED) ---
+        event_payload = json.dumps({
+            'reservation_token': reservation_token,
+            'subtotal_cents': subtotal_cents,
+            'total_cents': total_cents,
+        })
+        insert_order_event(cur, order_id, 'CREATED', event_payload)
 
-          # --- Step 6: Insert Order Events (CREATED) ---
-          event_payload = json.dumps({
-              'reservation_token': reservation_token,
-              'subtotal_cents': subtotal_cents,
-              'total_cents': total_cents,
-          })
-          insert_order_event(cur, order_id, 'CREATED', event_payload)
+        # --- Step 7: Update Order Status/Payment ---
+        update_order_payment_succeeded(cur, 'CAPTURED', 'CONFIRMED', order_id)
 
-          # --- Step 7: Update Order Status/Payment ---
-          update_order_payment_succeeded(cur, 'CAPTURED', 'CONFIRMED', order_id)
+        # --- Step 8: Update Idempotency Key Status ---
+        update_order_idempotency_key(cur, order_id, 'CONFIRMED', idempotency_key)
 
-          # --- Step 8: Update Idempotency Key Status ---
-          update_order_idempotency_key(cur, 'CONFIRMED', reservation_token)
+        # --- Step 9: Insert Order Events (PAYMENT_CAPTURED) ---
+        event_payload = json.dumps({
+            'provider': 'stripe',
+        })
+        insert_order_event(cur, order_id, 'PAYMENT_CAPTURED', event_payload)
 
-          # --- Step 9: Insert Order Events (PAYMENT_CAPTURED) ---
-          event_payload = json.dumps({
-              'provider': 'stripe',
-          })
-          insert_order_event(cur, order_id, 'PAYMENT_CAPTURED', event_payload)
-
-        except Exception as e:
-          # Log the error and move to the next iteration
-          print(f"❌ ERROR processing Order ID {order_id} for User ID {user_id}. Details: {e}")
-          # If this is inside a larger transaction (which is typical for seeding),
-          # the transaction will eventually fail unless you explicitly handle savepoints/rollbacks.
-          continue
+      except Exception as e:
+        # Log the error and move to the next iteration
+        print(f"❌ ERROR processing Order ID {order_id} for User ID {user_id}. Details: {e}")
+        # If this is inside a larger transaction (which is typical for seeding),
+        # the transaction will eventually fail unless you explicitly handle savepoints/rollbacks.
+        continue
 
 
 def insert_idempotency_key(
     cur: cursor,
     user_id: str,
-    order_id: str,
     status: str,
+    idempotency_key: str,
 ):
   try:
     cur.execute(
         """INSERT INTO order_idempotency_keys (
                 id, idempotency_key, user_id, order_id, status, created_at, updated_at, expires_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""", [
-            str(ULID()), 'idem_' + str(ULID()), user_id, order_id, status,
+            str(ULID()), idempotency_key, user_id, None, status,
             get_time_miliseconds(), None,
             get_time_miliseconds() + (60 * 1000)
         ])
   except Psycopg2Error as e:
-    raise SeedingError(
-        f"DB INSERT failed for order_idempotency_keys. Order ID: {order_id}, Error: {e}") from e
+    raise SeedingError(f"DB INSERT failed for order_idempotency_keys. Error: {e}") from e
 
 
-def update_order_idempotency_key(cur: cursor, status: str, reservation_token: str):
+def update_order_idempotency_key(cur: cursor, order_id: str, status: str, idempotency_key: str):
   stmt = """
-        UPDATE order_idempotency_keys SET status = %s, updated_at = %s WHERE idempotency_key = %s
+        UPDATE order_idempotency_keys SET order_id = %s, status = %s, updated_at = %s WHERE idempotency_key = %s
     """
   try:
-    cur.execute(stmt, [status, get_time_miliseconds(), reservation_token])
+    cur.execute(stmt, [order_id, status, get_time_miliseconds(), idempotency_key])
   except Psycopg2Error as e:
     raise SeedingError(
-        f"DB UPDATE failed for order_idempotency_keys. Token: {reservation_token}, Error: {e}"
-    ) from e
+        f"DB UPDATE failed for order_idempotency_keys. Token: {idempotency_key}, Error: {e}") from e
 
 
 def insert_inventory_reservation(cur: cursor, id: str, token: str, order_id: str):
@@ -197,8 +193,8 @@ def update_order_payment_succeeded(cur: cursor, payment_status: str, status: str
         f"DB UPDATE failed for orders (payment status). Order ID: {order_id}, Error: {e}") from e
 
 
-def insert_order_line_item(cur: cursor, order_id: str, product_id: str, variant_id: str, sku: str,
-                           title: str, quantity: int, unit_price_cents: int,
+def insert_order_line_item(cur: cursor, id: str, order_id: str, product_id: str, variant_id: str,
+                           sku: str, title: str, quantity: int, unit_price_cents: int,
                            list_price_cents: int | None, sale_price_cents: int | None,
                            discount_cents: int, tax_cents: int, total_cents: int,
                            shipping_cents: int):
@@ -210,7 +206,7 @@ def insert_order_line_item(cur: cursor, order_id: str, product_id: str, variant_
                 applied_offer_ids, product_snapshot, status, shipping_cents, created_at, updated_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
-            str(ULID()), order_id, product_id, variant_id, sku, title,
+            id, order_id, product_id, variant_id, sku, title,
             json.dumps({}), quantity, unit_price_cents, list_price_cents, sale_price_cents,
             discount_cents, tax_cents, total_cents, [], None, 'CREATED', shipping_cents,
             get_time_miliseconds(), None
@@ -236,7 +232,7 @@ def insert_order_event(cur: cursor, order_id: str, event_type: str, event_payloa
 
 def get_order_line_items(cur: cursor, offer: ProductOffer, product_id: str, product_title,
                          order_id: str, now_ms: int) -> Dict[str, Any]:
-  items = []
+  items: list[Dict[str, Any]] = []
   subtotal_cents = 0
   total_discount_cents = 0
   total_tax_cents = 0
@@ -251,6 +247,7 @@ def get_order_line_items(cur: cursor, offer: ProductOffer, product_id: str, prod
 
       inventory_item = get_inventory_item(cur, product_id, variant_id)
       if inventory_item is None:
+        print("Inventory item is not exists, this should not happen")
         continue
 
       # Check inventory availability before calculating quantity
@@ -262,7 +259,7 @@ def get_order_line_items(cur: cursor, offer: ProductOffer, product_id: str, prod
       if quantity_available < quantity or quantity == 0:
         continue
 
-      # ... rest of the successful calculation logic ...
+      update_inventory_item(cur, inventory_item['id'], quantity)
       unit_price = sale_price_db if sale_price_db else price_cents_db
       line_subtotal = unit_price * quantity
       discount_cents = int(line_subtotal * 0.05) if choice([True, False]) else 0
@@ -275,7 +272,10 @@ def get_order_line_items(cur: cursor, offer: ProductOffer, product_id: str, prod
       total_tax_cents += tax_cents
       total_shipping_cents += shipping_cents
 
-      items.append(
+      item: Dict[str, Any] = {
+          "inventory_item_id":
+          inventory_item['id'],
+          "order_line_item":
           OrderLineItem(id=str(ULID()),
                         product_id=product_id,
                         variant_id=variant_id,
@@ -297,8 +297,10 @@ def get_order_line_items(cur: cursor, offer: ProductOffer, product_id: str, prod
                         applied_offer_ids=[],
                         product_snapshot=None,
                         shipping_cents=shipping_cents,
-                        created_at=now_ms))
+                        created_at=now_ms)
+      }
 
+      items.append(item)
     except ValueError as e:
       # Catch errors when converting Protobuf string fields (price, etc.) to int/float
       raise SeedingError(
@@ -352,3 +354,41 @@ def get_inventory_item(cur: cursor, product_id: str, variant_id: str):
     raise SeedingError(
         f"DB SELECT failed for inventory_items. Product ID: {product_id}, Variant: {variant_id}, Error: {e}"
     ) from e
+
+
+def update_inventory_item(cur: cursor, id: str, quantity: int):
+  stmt = """
+    UPDATE inventory_items 
+			SET 
+					quantity_reserved = quantity_reserved + %s,
+					quantity_available = quantity_available - %s,
+					updated_at = %s
+			WHERE id = %s AND quantity_available >= %s
+  """
+  try:
+    cur.execute(stmt, [quantity, quantity, get_time_miliseconds(), id, quantity])
+  except Psycopg2Error as e:
+    raise SeedingError(f"DB UPDATE failed for inventory quantity_item. Error: {e}") from e
+
+
+def insert_inventory_reservation_item(
+    cur: cursor,
+    reservation_id: str,
+    inventory_item_id: str,
+    quantity: int,
+):
+  stmt = """
+    INSERT INTO inventory_reservation_items (
+			id, 
+			reservation_id, 
+			inventory_item_id, 
+			quantity, 
+			created_at
+		) VALUES (%s, %s, %s, %s, %s)
+  """
+  try:
+    cur.execute(stmt,
+                [str(ULID()), reservation_id, inventory_item_id, quantity,
+                 get_time_miliseconds()])
+  except Psycopg2Error as e:
+    raise SeedingError(f"DB INSERT failed for inventory_reservation_items. Error: {e}") from e

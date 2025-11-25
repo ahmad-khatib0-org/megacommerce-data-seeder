@@ -1,8 +1,8 @@
 import json
 
 from faker import Faker
-from google.protobuf import json_format  # <-- Essential Protobuf import for parsing JSON
-from products.v1.product_pb2 import ProductOffer  # <-- Essential Protobuf class import
+from google.protobuf import json_format
+from products.v1.product_pb2 import ProductOffer
 from psycopg2.extensions import connection
 from psycopg2 import Error as Psycopg2Error
 from ulid import ULID
@@ -20,12 +20,9 @@ def seed_inventory(conn: connection):
     """
   products_data = []
 
-  ## 1. Fetch Product/Offer Data
-  # Fetch all data first to free the cursor for subsequent INSERT statements.
   try:
     with conn.cursor() as cur:
       cur.execute('SELECT id, offer FROM products')
-      # Fetch all rows into a list
       products_data = cur.fetchall()
 
       if not products_data:
@@ -37,22 +34,17 @@ def seed_inventory(conn: connection):
   except Exception as e:
     raise SeedingError(f"Unexpected error while fetching products for inventory: {e}") from e
 
-  ## 2. Process Products and Insert Inventory Items
   for product_row in products_data:
     product_id = product_row[0]
     offer_json_raw = product_row[1]
 
     try:
-      inventory_ulid = str(ULID())
-
       offer = ProductOffer()
 
-      # --- Data Parsing Risk: Parse JSON from DB into Protobuf Message ---
       if offer_json_raw:
         # json.dumps converts the psycopg2 JSON/dict object into a string for parsing
         json_format.Parse(json.dumps(offer_json_raw), offer)
 
-      # Iterate over variants in the parsed offer
       for variant_id, variant_data in offer.offer.items():
 
         sku = variant_data.sku or fake.unique.bothify(text='SKU-#####')
@@ -68,8 +60,6 @@ def seed_inventory(conn: connection):
         quantity_reserved = 0
         quantity_available = quantity_total - quantity_reserved
 
-        # --- DB Insertion ---
-        # Use a new cursor or the same one, but ensure it's not being iterated over
         with conn.cursor() as cur:
           cur.execute(
               """INSERT INTO inventory_items (
@@ -86,14 +76,10 @@ def seed_inventory(conn: connection):
               ])
 
     except Psycopg2Error as e:
-      # Specific error for DB insertion failure
-      print(
-          f"❌ DB INSERT failed for inventory_items (ID: {inventory_ulid}, Product: {product_id}). Error: {e}"
-      )
-      continue  # Log error and move to next product
+      print(f"❌ DB INSERT failed for inventory_items (Product: {product_id}). Error: {e}")
+      continue
     except Exception as e:
-      # Catch errors during JSON/Protobuf parsing, or data calculation
       print(f"❌ DATA PROCESSING failed for Product {product_id}. Error: {e}")
-      continue  # Log error and move to next product
+      continue
 
   print(f" Successfully seeded inventory for {len(products_data)} products.")
