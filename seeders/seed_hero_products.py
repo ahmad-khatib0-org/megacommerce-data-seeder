@@ -50,10 +50,10 @@ def seed_hero_products(con: connection):
       products_idx = 0
       for _ in range(4):
         (variant_id, variant) = random.choice(list(sale_products[products_idx].offer.offer.items()))
-        product = HeroProductListItem()
-        product.id = str(ULID())
-        product.variant_id = variant_id
-        category_slider.products.append(product)
+        product_item = HeroProductListItem()
+        product_item.id = sale_products[products_idx].id
+        product_item.variant_id = variant_id
+        category_slider.products.append(product_item)
         products_idx += 1
 
       welcome_deals = WelcomeDealsSlider()
@@ -63,17 +63,20 @@ def seed_hero_products(con: connection):
 
       for _ in range(4):
         (variant_id, variant) = random.choice(list(sale_products[products_idx].offer.offer.items()))
-        product = HeroProductListItem()
-        product.id = str(ULID())
-        product.variant_id = variant_id
-
-        welcome_deals.products.append(product)
+        product_item = HeroProductListItem()
+        product_item.id = sale_products[products_idx].id
+        product_item.variant_id = variant_id
+        welcome_deals.products.append(product_item)
         products_idx += 1
 
       hero_product_data.category_slider.CopyFrom(category_slider)
       hero_product_data.welcome_deals_slider.CopyFrom(welcome_deals)
 
-      data_json = json_format.MessageToJson(hero_product_data)
+      data_json = json_format.MessageToJson(
+          hero_product_data,
+          preserving_proto_field_name=True,  # keeps snake_case!
+          indent=2,
+          use_integers_for_enums=False)
       cur.execute(stmt, [str(ULID()), data_json, get_time_miliseconds()])
     con.commit()
 
