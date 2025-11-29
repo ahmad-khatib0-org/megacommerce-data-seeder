@@ -1,6 +1,7 @@
 from general_utils.db import DatabasePool
 from general_utils.general import fatal
 from seeders.load import load
+from seeders.seed_hero_products import seed_hero_products
 from seeders.seed_inventory import seed_inventory
 from seeders.seed_orders import seed_orders
 from seeders.seed_products import seed_products
@@ -17,10 +18,11 @@ def main():
     conn = DatabasePool.get_conn()
     conn.autocommit = False
 
-    seed_users(conn, config)
-    seed_products(conn, config)
-    seed_inventory(conn)
-    seed_orders(conn, config)
+    # seed_users(conn, config)
+    # seed_products(conn, config)
+    # seed_inventory(conn)
+    # seed_orders(conn, config)
+    seed_hero_products(conn)
 
     # All operations successful, commit the transaction
     conn.commit()
