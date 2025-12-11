@@ -1,5 +1,6 @@
 import json
-from random import choice
+import time
+from random import choice, randint
 from typing import Any, Dict
 
 from faker import Faker
@@ -203,13 +204,14 @@ def insert_order_line_item(cur: cursor, id: str, order_id: str, product_id: str,
         """INSERT INTO order_line_items (
                 id, order_id, product_id, variant_id, sku, title, attributes, quantity, unit_price_cents,
                 list_price_cents, sale_price_cents, discount_cents, tax_cents, total_cents, 
-                applied_offer_ids, product_snapshot, status, shipping_cents, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                applied_offer_ids, product_snapshot, status, shipping_cents, created_at, updated_at, estimated_delivery_date
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         [
             id, order_id, product_id, variant_id, sku, title,
             json.dumps({}), quantity, unit_price_cents, list_price_cents, sale_price_cents,
             discount_cents, tax_cents, total_cents, [], None, 'CREATED', shipping_cents,
-            get_time_miliseconds(), None
+            get_time_miliseconds(), None,
+            int(time.time() * 1000) + randint(2 * 24 * 60 * 60 * 1000, 7 * 24 * 60 * 60 * 1000)
         ])
   except Psycopg2Error as e:
     raise SeedingError(

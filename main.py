@@ -18,10 +18,10 @@ def main():
     conn = DatabasePool.get_conn()
     conn.autocommit = False
 
-    # seed_users(conn, config)
-    # seed_products(conn, config)
-    # seed_inventory(conn)
-    # seed_orders(conn, config)
+    seed_users(conn, config)
+    seed_products(conn, config)
+    seed_inventory(conn)
+    seed_orders(conn, config)
     seed_hero_products(conn)
 
     # All operations successful, commit the transaction

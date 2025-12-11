@@ -1,3 +1,4 @@
+import json
 import os
 import random
 from typing import Any, Dict, List, Tuple
@@ -26,8 +27,13 @@ OFFERING_CONDITION = ['new', 'used']
 
 class ProductGenerator:
   def __init__(self, cfg: Config):
+    self.cfg = cfg
     self.used_variant_names = set()
     try:
+      # First, let's test the connection to MinIO
+      print(f"Connecting to MinIO at: {cfg.minio.amazon_s3_endpoint}")
+      print(f"Using access key: {cfg.minio.amazon_s3_access_key_id[:4]}...")
+
       self.minio_client = Minio(cfg.minio.amazon_s3_endpoint,
                                 access_key=cfg.minio.amazon_s3_access_key_id,
                                 secret_key=cfg.minio.amazon_s3_secret_access_key,
@@ -40,11 +46,63 @@ class ProductGenerator:
   def ensure_bucket(self) -> None:
     """Ensure MinIO bucket exists, create if it doesn't"""
     try:
+      print(f"Checking if bucket '{self.minio_bucket}' exists...")
+
+      # First, try to list buckets to test connection
+      try:
+        buckets = self.minio_client.list_buckets()
+        print(f"Successfully connected to MinIO. Found {len(buckets)} buckets.")
+      except Exception as e:
+        print(f"Failed to list buckets: {e}")
+        # Try without SSL
+        self.minio_client = Minio(self.cfg.minio.amazon_s3_endpoint,
+                                  access_key=self.cfg.minio.amazon_s3_access_key_id,
+                                  secret_key=self.cfg.minio.amazon_s3_secret_access_key,
+                                  secure=False)
+        buckets = self.minio_client.list_buckets()
+        print(f"Connected with secure=False. Found {len(buckets)} buckets.")
+
       if not self.minio_client.bucket_exists(self.minio_bucket):
-        self.minio_client.make_bucket(self.minio_bucket)
-        print(f"Bucket '{self.minio_bucket}' created successfully")
+        print(f"Bucket '{self.minio_bucket}' does not exist. Creating...")
+
+        # Simplified approach - create bucket first, then set policy
+        try:
+          # First create the bucket without policy
+          self.minio_client.make_bucket(self.minio_bucket)
+          print(f"Bucket '{self.minio_bucket}' created successfully")
+
+          # Then try to set policy separately
+          try:
+            public_read_policy = {
+                "Version":
+                "2012-10-17",
+                "Statement": [{
+                    "Effect": "Allow",
+                    "Principal": {
+                        "AWS": ["*"]
+                    },
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{self.minio_bucket}/*"]
+                }]
+            }
+            self.minio_client.set_bucket_policy(self.minio_bucket, json.dumps(public_read_policy))
+            print(f"Public read policy set for bucket '{self.minio_bucket}'")
+          except Exception as policy_error:
+            print(f"Warning: Could not set bucket policy: {policy_error}")
+            # Continue without policy - bucket is still created
+
+        except Exception as e:
+          # Try alternative approach if the first fails
+          print(f"Standard bucket creation failed: {e}")
+          print("Trying alternative method...")
+
+          # Some MinIO versions require region
+          self.minio_client.make_bucket(self.minio_bucket, location="us-east-1")
+          print(f"Bucket '{self.minio_bucket}' created with region 'us-east-1'")
+
       else:
         print(f"Bucket '{self.minio_bucket}' already exists")
+
     except Exception as e:
       raise SeedingError(
           f"MinIO operation failed while ensuring bucket '{self.minio_bucket}': {e}") from e
@@ -551,8 +609,8 @@ def seed_products(conn, cfg: Config):
             Json(media),  # 18
             Json(offer),  # 19
             Json(safety),  # 20
-            Json('[]'),  # 21 - tags
-            Json('{"source": "manual_entry"}'),  # 22 - metadata
+            Json([]),  # 21 - tags
+            Json({"source": "manual_entry"}),  # 22 - metadata
             False,  # 23 - ar_enabled
             title.replace(' ', '-').lower(),  # 24 - slug
             status,  # 25
