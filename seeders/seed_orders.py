@@ -34,79 +34,81 @@ def seed_orders(con: connection, cfg: Config):
       return
 
     product_idx = 0
+
     for user_id in user_ids:
-      order_id = str(ULID())
-      try:
-        # Logic to cycle through products
-        if (product_idx + 1) >= len(products):
-          product_idx = 0
-        else:
-          product_idx += 1
+      for _ in range(cfg.seeding.number_of_orders_per_customer):
+        order_id = str(ULID())
+        try:
+          # Logic to cycle through products
+          if (product_idx + 1) >= len(products):
+            product_idx = 0
+          else:
+            product_idx += 1
 
-        # Gather key data
-        now_ms = get_time_miliseconds()
-        offer = products[product_idx].offer
-        product_id = products[product_idx].id
-        product_title = products[product_idx].title
+          # Gather key data
+          now_ms = get_time_miliseconds()
+          offer = products[product_idx].offer
+          product_id = products[product_idx].id
+          product_title = products[product_idx].title
 
-        # --- Step 1: Insert Idempotency Key ---
-        idempotency_key = 'idem_' + str(ULID())
-        insert_idempotency_key(cur, user_id, 'IN_PROGRESS', idempotency_key)
+          # --- Step 1: Insert Idempotency Key ---
+          idempotency_key = 'idem_' + str(ULID())
+          insert_idempotency_key(cur, user_id, 'IN_PROGRESS', idempotency_key)
 
-        # --- Step 2: Get Line Items
-        items = get_order_line_items(cur, offer, product_id, product_title, order_id, now_ms)
-        order_line_items: list[Dict[str, Any]] = items['items']
-        subtotal_cents = items['subtotal_cents']
-        total_discount_cents = items['total_discount_cents']
-        total_tax_cents = items['total_tax_cents']
-        total_shipping_cents = items['total_shipping_cents']
-        total_cents = subtotal_cents - total_discount_cents + total_tax_cents + total_shipping_cents
+          # --- Step 2: Get Line Items
+          items = get_order_line_items(cur, offer, product_id, product_title, order_id, now_ms)
+          order_line_items: list[Dict[str, Any]] = items['items']
+          subtotal_cents = items['subtotal_cents']
+          total_discount_cents = items['total_discount_cents']
+          total_tax_cents = items['total_tax_cents']
+          total_shipping_cents = items['total_shipping_cents']
+          total_cents = subtotal_cents - total_discount_cents + total_tax_cents + total_shipping_cents
 
-        # --- Step 3: Insert Order ---
-        insert_order(cur, order_id, user_id, total_cents, subtotal_cents, total_shipping_cents,
-                     total_tax_cents, total_discount_cents, total_cents)
+          # --- Step 3: Insert Order ---
+          insert_order(cur, order_id, user_id, total_cents, subtotal_cents, total_shipping_cents,
+                       total_tax_cents, total_discount_cents, total_cents)
 
-        # --- Step 4: Insert Inventory Reservation ---
-        reservation_id = str(ULID())
-        reservation_token = f"res_{str(ULID())}"
-        insert_inventory_reservation(cur, reservation_id, reservation_token, order_id)
+          # --- Step 4: Insert Inventory Reservation ---
+          reservation_id = str(ULID())
+          reservation_token = f"res_{str(ULID())}"
+          insert_inventory_reservation(cur, reservation_id, reservation_token, order_id)
 
-        # --- Step 5: Insert Order Line Items ---
-        for order_line_item in order_line_items:
-          inventory_id = order_line_item['inventory_item_id']
-          item: OrderLineItem = order_line_item['order_line_item']
-          insert_order_line_item(cur, item.id, order_id, item.product_id, item.variant_id, item.sku,
-                                 item.title, item.quantity, item.unit_price_cents,
-                                 item.list_price_cents, item.sale_price_cents, item.discount_cents,
-                                 item.tax_cents, item.total_cents, item.shipping_cents)
-          insert_inventory_reservation_item(cur, reservation_id, inventory_id, item.quantity)
+          # --- Step 5: Insert Order Line Items ---
+          for order_line_item in order_line_items:
+            inventory_id = order_line_item['inventory_item_id']
+            item: OrderLineItem = order_line_item['order_line_item']
+            insert_order_line_item(cur, item.id, order_id, item.product_id, item.variant_id,
+                                   item.sku, item.title, item.quantity, item.unit_price_cents,
+                                   item.list_price_cents, item.sale_price_cents,
+                                   item.discount_cents, item.tax_cents, item.total_cents,
+                                   item.shipping_cents)
+            insert_inventory_reservation_item(cur, reservation_id, inventory_id, item.quantity)
 
-        # --- Step 6: Insert Order Events (CREATED) ---
-        event_payload = json.dumps({
-            'reservation_token': reservation_token,
-            'subtotal_cents': subtotal_cents,
-            'total_cents': total_cents,
-        })
-        insert_order_event(cur, order_id, 'CREATED', event_payload)
+          # --- Step 6: Insert Order Events (CREATED) ---
+          event_payload = json.dumps({
+              'reservation_token': reservation_token,
+              'subtotal_cents': subtotal_cents,
+              'total_cents': total_cents,
+          })
+          insert_order_event(cur, order_id, 'CREATED', event_payload)
 
-        # --- Step 7: Update Order Status/Payment ---
-        update_order_payment_succeeded(cur, 'CAPTURED', 'CONFIRMED', order_id)
+          # --- Step 7: Update Order Status/Payment ---
+          update_order_payment_succeeded(cur, 'CAPTURED', 'CONFIRMED', order_id)
 
-        # --- Step 8: Update Idempotency Key Status ---
-        update_order_idempotency_key(cur, order_id, 'CONFIRMED', idempotency_key)
+          # --- Step 8: Update Idempotency Key Status ---
+          update_order_idempotency_key(cur, order_id, 'CONFIRMED', idempotency_key)
 
-        # --- Step 9: Insert Order Events (PAYMENT_CAPTURED) ---
-        event_payload = json.dumps({
-            'provider': 'stripe',
-        })
-        insert_order_event(cur, order_id, 'PAYMENT_CAPTURED', event_payload)
-
-      except Exception as e:
-        # Log the error and move to the next iteration
-        print(f"❌ ERROR processing Order ID {order_id} for User ID {user_id}. Details: {e}")
-        # If this is inside a larger transaction (which is typical for seeding),
-        # the transaction will eventually fail unless you explicitly handle savepoints/rollbacks.
-        continue
+          # --- Step 9: Insert Order Events (PAYMENT_CAPTURED) ---
+          event_payload = json.dumps({
+              'provider': 'stripe',
+          })
+          insert_order_event(cur, order_id, 'PAYMENT_CAPTURED', event_payload)
+        except Exception as e:
+          # Log the error and move to the next iteration
+          print(f"❌ ERROR processing Order ID {order_id} for User ID {user_id}. Details: {e}")
+          # If this is inside a larger transaction (which is typical for seeding),
+          # the transaction will eventually fail unless you explicitly handle savepoints/rollbacks.
+          continue
 
 
 def insert_idempotency_key(

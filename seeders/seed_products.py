@@ -1,6 +1,7 @@
 import json
 import os
 import random
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
 from faker import Faker
@@ -29,6 +30,7 @@ class ProductGenerator:
   def __init__(self, cfg: Config):
     self.cfg = cfg
     self.used_variant_names = set()
+    self.executor = ThreadPoolExecutor(max_workers=self.cfg.minio.max_upload_workers)  # Initialize thread pool
     try:
       # First, let's test the connection to MinIO
       print(f"Connecting to MinIO at: {cfg.minio.amazon_s3_endpoint}")
@@ -42,6 +44,38 @@ class ProductGenerator:
       self.ensure_bucket()
     except Exception as e:
       raise SeedingError(f"Failed to initialize MinIO client or ensure bucket: {e}") from e
+
+  def __del__(self):
+    self.executor.shutdown(wait=True)
+
+  @staticmethod
+  def upload_image_to_minio_static(minio_client: Minio, minio_bucket: str, image_path: str, attachment_id: str) -> Dict[str, Any]:
+    """Upload image to MinIO and return media info"""
+    try:
+      file_ext = os.path.splitext(image_path)[1].lower().replace('.', '')
+      format_map = {'jpg': 'JPEG', 'jpeg': 'JPEG', 'png': 'PNG', 'gif': 'GIF', 'webp': 'WEBP'}
+      format_type = format_map.get(file_ext, 'JPEG')
+
+      file_size = os.path.getsize(image_path)
+      object_name = f"{attachment_id}.{file_ext}"
+
+      minio_client.fput_object(bucket_name=minio_bucket,
+                                      object_name=object_name,
+                                      file_path=image_path,
+                                      content_type=f"image/{format_type.lower()}")
+
+      return {"format": format_type, "url": f"{object_name}", "size": file_size}
+
+    except Exception as e:
+      # Log failure but continue with placeholder
+      print(f"⚠️ Warning: MinIO upload failed for {image_path}. Using placeholder. Error: {e}")
+      return {
+          "format": "JPEG",
+          "url": f"https://placeholder.com/{attachment_id}.jpg",
+          "size": random.randint(50000, 2000000)
+      }
+
+
 
   def ensure_bucket(self) -> None:
     """Ensure MinIO bucket exists, create if it doesn't"""
@@ -408,36 +442,11 @@ class ProductGenerator:
     """Generate product media structure"""
     try:
 
-      def upload_image_to_minio(image_path: str, attachment_id: str) -> Dict[str, Any]:
-        """Upload image to MinIO and return media info"""
-        try:
-          file_ext = os.path.splitext(image_path)[1].lower().replace('.', '')
-          format_map = {'jpg': 'JPEG', 'jpeg': 'JPEG', 'png': 'PNG', 'gif': 'GIF', 'webp': 'WEBP'}
-          format_type = format_map.get(file_ext, 'JPEG')
-
-          file_size = os.path.getsize(image_path)
-          object_name = f"{attachment_id}.{file_ext}"
-
-          self.minio_client.fput_object(bucket_name=self.minio_bucket,
-                                        object_name=object_name,
-                                        file_path=image_path,
-                                        content_type=f"image/{format_type.lower()}")
-
-          return {"format": format_type, "url": f"{object_name}", "size": file_size}
-
-        except Exception as e:
-          # Log failure but continue with placeholder
-          print(f"⚠️ Warning: MinIO upload failed for {image_path}. Using placeholder. Error: {e}")
-          return {
-              "format": "JPEG",
-              "url": f"https://placeholder.com/{attachment_id}.jpg",
-              "size": random.randint(50000, 2000000)
-          }
-
       def get_variant_media() -> Dict[str, Any]:
         """Generate media for a single variant"""
         attachments_path = f"attachments/{subcategory_id}"
         images_map = {}
+        futures = []
 
         try:
           if os.path.exists(attachments_path):
@@ -457,8 +466,24 @@ class ProductGenerator:
             image_path = os.path.join(attachments_path,
                                       img_file) if os.path.exists(attachments_path) else img_file
 
-            image_info = upload_image_to_minio(image_path, attachment_id)
-            images_map[attachment_id] = image_info
+            # Submit upload to the thread pool
+            future = self.executor.submit(ProductGenerator.upload_image_to_minio_static,
+                                          self.minio_client, self.minio_bucket,
+                                          image_path, attachment_id)
+            futures.append((attachment_id, future))
+
+          # Wait for all uploads to complete and collect results
+          for attachment_id, future in futures:
+            try:
+              image_info = future.result()
+              images_map[attachment_id] = image_info
+            except Exception as e:
+              print(f"❌ Error uploading image for attachment ID {attachment_id}: {e}")
+              images_map[attachment_id] = {
+                  "format": "JPEG",
+                  "url": f"https://placeholder.com/{attachment_id}.jpg",
+                  "size": random.randint(50000, 2000000)
+              }
 
         except Exception as e:
           raise SeedingError(
