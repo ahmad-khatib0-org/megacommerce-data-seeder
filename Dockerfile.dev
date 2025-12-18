@@ -1,38 +1,43 @@
-# Multi-stage build for Python data seeder service
-FROM python:3.12-slim-bookworm AS base
+# Stage 1: Builder
+FROM python:3.12-alpine AS builder
 
 WORKDIR /app
 
-ENV ENV=dev \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    postgresql-client \
+# Install build dependencies
+RUN apk add --no-cache \
+    build-base \
+    git \
     curl \
-    git && rm -rf /var/lib/apt/lists/*
-
-# Builder stage
-FROM base AS builder
+    postgresql-dev \
+    libffi-dev
 
 COPY requirements/base.txt requirements/git.txt ./
 
-# First install Git-based dependencies with --no-deps
-RUN pip install --user --no-warn-script-location --no-deps -r git.txt
+RUN pip install --user --no-cache-dir --no-deps -r git.txt && \
+    pip install --user --no-cache-dir -r base.txt
 
-# Then install other dependencies
-RUN pip install --user --no-warn-script-location -r base.txt
+# Stage 2: Runtime (TINIER!)
+FROM python:3.12-alpine
 
-# Development stage
-FROM base AS dev
+WORKDIR /app
 
-# Copy Python packages from builder
+# Install runtime dependencies
+RUN apk add --no-cache \
+    postgresql-client \
+    curl \
+    libpq
+
+# Copy installed packages
 COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
-COPY . .
+# Copy source
+COPY main.py .
+COPY seeders/ ./seeders/
+COPY general_utils/ ./general_utils/
+COPY models/ ./models/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 CMD ["python", "main.py"]
